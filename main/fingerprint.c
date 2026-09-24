@@ -197,8 +197,9 @@ bool fingerprint_finger_down(void) {
 // so an IRQ-based wait returned instantly and the next enrollment capture
 // could re-photograph the finger that was never lifted.
 static void wait_for_lift(uint32_t timeout_ms) {
-  TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
-  while (fingerprint_finger_down() && xTaskGetTickCount() < deadline) {
+  TickType_t start = xTaskGetTickCount();
+  while (fingerprint_finger_down() &&
+         (xTaskGetTickCount() - start) < pdMS_TO_TICKS(timeout_ms)) {
     vTaskDelay(pdMS_TO_TICKS(120));
   }
   vTaskDelay(pdMS_TO_TICKS(150));  // settle so the next capture is a fresh press
@@ -408,7 +409,7 @@ int fingerprint_cached_count(void) {
 // Capture one image into char buffer `buffer` (1 or 2). Returns true on success.
 static bool capture_to_buffer(uint8_t buffer, uint32_t wait_ms) {
   uint8_t confirm = 0xff;
-  TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(wait_ms);
+  TickType_t start = xTaskGetTickCount();
   do {
     if (fp_command(CMD_GEN_IMAGE, NULL, 0, &confirm, NULL, NULL, 1000) && confirm == 0x00) {
       uint8_t buf = buffer;
@@ -421,7 +422,7 @@ static bool capture_to_buffer(uint8_t buffer, uint32_t wait_ms) {
       ESP_LOGW(TAG, "Img2Tz buf %u: confirm=0x%02x, retrying", buffer, confirm);
     }
     vTaskDelay(pdMS_TO_TICKS(80));
-  } while (xTaskGetTickCount() < deadline);
+  } while ((xTaskGetTickCount() - start) < pdMS_TO_TICKS(wait_ms));
   return false;
 }
 

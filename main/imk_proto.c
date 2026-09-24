@@ -119,8 +119,27 @@ static void send2(uint8_t b0, uint8_t b1) {
 
 static void send1(uint8_t b0) { send_raw(&b0, 1); }
 
-// Sensitive ops are gated only when there is a finger that could pass the gate.
-static bool gate_needed(void) { return (fingerprint_index_bitmap() >> 1) != 0; }
+// Sensitive ops are gated only when a finger exists that CAN pass the gate.
+// The switch finger is deliberately rejected by the gate (it is not an auth
+// finger), so it must not be counted here: deleting the last auth finger while
+// a switch finger remained would otherwise arm a gate nothing could open,
+// locking enrolment, deletion and the whole vault permanently. Excluding it
+// also recovers a device already left in that state.
+#define FP_SWITCH_APP_SLOT 5
+static bool gate_needed(void) {
+  uint8_t auth = (uint8_t)((fingerprint_index_bitmap() >> 1) & ~(1u << FP_SWITCH_APP_SLOT));
+  return auth != 0;
+}
+
+// A passed fingerprint opens a short window in which secret reads go through
+// without demanding a second touch — the app relies on this so that reading a
+// secret moments after an approved action doesn't prompt again.
+#define AUTH_COOLDOWN_MS 10000
+static TickType_t s_last_auth;
+static bool auth_cooldown_active(void) {
+  return s_last_auth != 0 &&
+         (xTaskGetTickCount() - s_last_auth) < pdMS_TO_TICKS(AUTH_COOLDOWN_MS);
+}
 
 // Execute a buffered keystore op; sends its result frame. Runs ungated (no
 // prints enrolled) straight from the dispatcher, or post-gate from the touch
@@ -383,6 +402,15 @@ void imk_proto_handle(const uint8_t *pkt, size_t len) {
     case CMD_KEY_READ: {
       // [cat][idx][off] -> [OK][readable_total][off][data<=59]
       if (plen < 3) { send1(ST_ERROR); break; }
+      // The secret half of an API entry (offset >= 32) requires a fingerprint.
+      // Without this the whole API vault reads out over BLE with no touch at
+      // all. Answer the app's side-effect-free probe with WAIT_FP and do NOT
+      // arm a gate or light the ring — the app follows with AUTH_REQUEST when
+      // it actually wants the touch.
+      if (payload[0] == KS_CAT_API && payload[2] >= 32 && !auth_cooldown_active()) {
+        send1(ST_WAIT_FP);
+        break;
+      }
       uint8_t body[3 + 59];
       uint8_t readable = 0;
       size_t n = imk_ks_read(payload[0], payload[1], payload[2], body + 3, 59, &readable);
@@ -559,6 +587,7 @@ void imk_proto_gate_on_touch(bool matched, uint16_t page_id) {
 
   gate_t g = s_gate;
   s_gate = GATE_NONE;
+  s_last_auth = xTaskGetTickCount();   // opens the secret-read window
   switch (g) {
     case GATE_AUTH:
       ESP_LOGI(TAG, "gate passed: AUTH_OK");
