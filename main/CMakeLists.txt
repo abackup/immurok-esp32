@@ -6,6 +6,7 @@ idf_component_register(
     "imk_proto.c"
     "imk_service.c"
     "imk_keystore.c"
+    "battery.c"
   INCLUDE_DIRS "."
-  REQUIRES driver nvs_flash esp_timer esp_driver_usb_serial_jtag mbedtls bt
+  REQUIRES driver esp_adc nvs_flash esp_timer esp_driver_usb_serial_jtag mbedtls bt
 )
