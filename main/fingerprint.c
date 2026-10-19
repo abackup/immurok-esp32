@@ -335,7 +335,7 @@ void fingerprint_led_breathe(uint8_t color) { (void)color; fingerprint_led_state
 // nobody asked for at 3am. Only resting states sleep — an active or waiting
 // state (reading, enrolling, gate armed, switching) must stay visible however
 // long it takes.
-#define LED_IDLE_SLEEP_MS (3 * 60 * 1000)
+#define LED_IDLE_SLEEP_MS (1 * 60 * 1000)
 static TickType_t s_led_activity;
 
 void fingerprint_led_note_activity(void) { s_led_activity = xTaskGetTickCount(); }
