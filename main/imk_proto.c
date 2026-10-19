@@ -12,6 +12,8 @@
 #include "imk_keystore.h"
 #include "imk_service.h"
 
+#include "battery.h"
+
 static const char *TAG = "imk_proto";
 
 // Opcodes (immurok protocol subset for Phase 5A).
@@ -213,13 +215,22 @@ void imk_proto_handle(const uint8_t *pkt, size_t len) {
   switch (cmd) {
     case CMD_GET_STATUS: {
       uint8_t bitmap = fingerprint_index_bitmap() >> 1;
+      battery_reading_t batt = {0};
+      if (battery_get_reading(&batt) != ESP_OK)
+      {
+        ESP_LOGW(TAG, "Battery read failed in GET_STATUS");
+      }
+
       uint8_t body[9] = {
-        ST_OK, bitmap,
-        (uint8_t)(imk_crypto_is_paired() ? 1 : 0),
-        100,           // battery %
-        99, 0, 0,      // fw major.minor.patch — deliberately far above any
-        0, 1,          // released manifest so the app never prompts an update
-                       // (this firmware updates over USB, not immurok OTA)
+          ST_OK,
+          bitmap,
+          (uint8_t)(imk_crypto_is_paired() ? 1 : 0),
+          batt.percent,
+          99,
+          0,
+          0,
+          0,
+          1,
       };
       send_raw(body, sizeof(body));
       break;
@@ -294,9 +305,25 @@ void imk_proto_handle(const uint8_t *pkt, size_t len) {
       break;
     }
 
-    case CMD_GET_BATT_RAW: {
-      // [status][mv:2LE][pct][adc:2LE] — USB-powered, report a full battery.
-      uint8_t body[6] = {ST_OK, (uint8_t)(4200 & 0xff), (uint8_t)(4200 >> 8), 100, 0, 0};
+    case CMD_GET_BATT_RAW:
+    {
+      battery_reading_t batt = {0};
+
+      if (battery_get_reading(&batt) != ESP_OK)
+      {
+        ESP_LOGW(TAG, "Battery read failed in GET_BATT_RAW");
+      }
+
+      // [status][mv:2LE][pct][adc:2LE]
+      // 保持原有的 6 字节 BLE 响应格式。
+      uint8_t body[6] = {
+          ST_OK,
+          (uint8_t)(batt.voltage_mv & 0xff),
+          (uint8_t)(batt.voltage_mv >> 8),
+          batt.percent,
+          (uint8_t)(batt.adc_raw & 0xff),
+          (uint8_t)(batt.adc_raw >> 8)};
+
       send_raw(body, sizeof(body));
       break;
     }
